@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: promanage-production
@@ -16,7 +15,6 @@ concurrency:
 env:
   AWS_REGION: ap-southeast-2
   REGISTRY: 838547582366.dkr.ecr.ap-southeast-2.amazonaws.com
-  AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
   DOMAIN: ${{ vars.DEPLOY_DOMAIN }}
   INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
 
@@ -41,16 +39,19 @@ jobs:
     steps:
       - name: Validate deployment variables
         shell: bash
+        env:
+          DEPLOY_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          DEPLOY_SECRET_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
           set -euo pipefail
-          for name in AWS_ROLE_ARN DOMAIN INSTANCE_ID; do
+          for name in DOMAIN INSTANCE_ID; do
             if [[ -z "${!name}" ]]; then
               echo "::error::Missing repository Actions variable: $name (DOMAIN is DEPLOY_DOMAIN; INSTANCE_ID is EC2_INSTANCE_ID)."
               exit 1
             fi
           done
-          if [[ ! "$AWS_ROLE_ARN" =~ ^arn:aws:iam::838547582366:role/[a-zA-Z0-9+=,.@_/-]+$ ]]; then
-            echo "::error::AWS_ROLE_ARN must be an IAM role ARN in account 838547582366."
+          if [[ -z "$DEPLOY_ACCESS_KEY" || -z "$DEPLOY_SECRET_KEY" ]]; then
+            echo "::error::Set repository Actions secrets AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY."
             exit 1
           fi
 
@@ -74,7 +75,8 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c # v4
         with:
-          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Verify AWS account
@@ -83,7 +85,7 @@ jobs:
           set -euo pipefail
           account=$(aws sts get-caller-identity --query Account --output text)
           if [[ "$account" != "838547582366" ]]; then
-            echo "::error::The assumed AWS role is not in the expected account."
+            echo "::error::The AWS credentials are not in the expected account."
             exit 1
           fi
 

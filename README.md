@@ -67,25 +67,7 @@ The workflow in `.github/workflows/deploy.yml` runs on every push to `main` and 
 Complete this **one-time setup before pushing the workflow**:
 
 1. Keep the existing EC2 setup in `/home/ec2-user/ec2`, including its `.env`. Attach `AmazonSSMManagedInstanceCore` as well as ECR pull access to the instance role. Ensure the Systems Manager agent is running, the instance appears **Online** in Systems Manager → Fleet Manager, and it has network access to Systems Manager, ECR and Docker Hub. The domain must point to EC2, and TCP 80/443 must be open.
-2. In IAM → Identity providers, add the GitHub OIDC provider if it does not already exist: provider URL `https://token.actions.githubusercontent.com`, audience `sts.amazonaws.com`.
-3. Create an IAM role for GitHub Actions with this trust policy. It permits only this repository's `main` branch to assume the role. The subject below uses the repository's immutable GitHub owner and repository IDs; if GitHub reports a different `sub` for this repository, adjust the exact subject to match its token (see [GitHub's OIDC documentation](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws)).
-
-   ```json
-   {
-     "Version": "2012-10-17",
-     "Statement": [{
-       "Effect": "Allow",
-       "Principal": { "Federated": "arn:aws:iam::838547582366:oidc-provider/token.actions.githubusercontent.com" },
-       "Action": "sts:AssumeRoleWithWebIdentity",
-       "Condition": { "StringEquals": {
-         "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-         "token.actions.githubusercontent.com:sub": "repo:rajukv9381-cmd@357387278/proManager@1462672596:ref:refs/heads/main"
-       }}
-     }]
-   }
-   ```
-
-4. Attach the following inline permissions policy to that **GitHub Actions role**, replacing the instance ID if yours changes:
+2. Create a dedicated IAM user for GitHub Actions, without console access. Attach the following inline permissions policy to the **IAM user**, replacing the instance ID if yours changes:
 
    ```json
    {
@@ -108,13 +90,13 @@ Complete this **one-time setup before pushing the workflow**:
    }
    ```
 
-5. In GitHub → repository **Settings → Secrets and variables → Actions → Variables**, add:
-   - `AWS_ROLE_ARN`: the GitHub Actions role ARN created above.
+3. In IAM, open the user → **Security credentials → Create access key**. Store the access key ID and secret access key directly in GitHub → repository **Settings → Secrets and variables → Actions → Secrets** as `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. Do not paste them into chat or commit them. The secret access key is shown only when created.
+4. In the same GitHub settings under **Variables**, add:
    - `EC2_INSTANCE_ID`: `i-0deaf02bd4a1f6741` (or your replacement instance ID).
    - `DEPLOY_DOMAIN`: `rajutest.duckdns.org` (or your current domain, without `https://`).
-6. Commit and push the workflow to `main`. Check **GitHub → Actions → Build and deploy** for test, build, and EC2 deployment status. A successful container deployment does not by itself guarantee HTTPS certificate issuance; check Caddy logs and the public URL separately.
+5. Commit and push the workflow to `main`. Check **GitHub → Actions → Build and deploy** for test, build, and EC2 deployment status. A successful container deployment does not by itself guarantee HTTPS certificate issuance; check Caddy logs and the public URL separately.
 
-This role can execute commands as root on the selected instance through Systems Manager. Protect `main` with branch protection, restrict who can change workflows and repository variables, and restrict who can assume or modify the IAM role. GitHub Actions uses short-lived OIDC credentials; do not add AWS access keys as repository secrets. Back up the EC2 secrets, database, and uploads independently. A failed deployment is reported in Actions but does not automatically roll back; a failed second image push can leave the first image in ECR. Re-running a commit can fail if ECR tag immutability is enabled and its tag already exists.
+This IAM user can execute commands as root on the selected instance through Systems Manager. Protect `main` with branch protection and restrict who can edit workflows, secrets, variables, and the IAM user. Access keys are long-lived: rotate them regularly and deactivate them immediately if exposed. OIDC with short-lived credentials is safer when available. Back up the EC2 secrets, database, and uploads independently. A failed deployment is reported in Actions but does not automatically roll back; a failed second image push can leave the first image in ECR. Re-running a commit can fail if ECR tag immutability is enabled and its tag already exists.
 
 ## Task components
 
