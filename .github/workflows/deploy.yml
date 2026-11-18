@@ -1,0 +1,80 @@
+name: Build and deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: promanage-production
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-southeast-2
+  REGISTRY: 838547582366.dkr.ecr.ap-southeast-2.amazonaws.com
+  DOMAIN: ${{ vars.DEPLOY_DOMAIN }}
+  INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: promanage
+          POSTGRES_PASSWORD: test-only-password
+          POSTGRES_DB: promanage_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U promanage -d promanage_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install and test
+        env:
+          PROMANAGE_TEST_DATABASE_URL: postgresql://promanage:test-only-password@localhost:5432/promanage_test
+        run: |
+          npm ci
+          npm test
+          npm run build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c # v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          allowed-account-ids: "838547582366"
+
+      - name: Build and push both images
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DOCKER_CONFIG
+          DOCKER_CONFIG=$(mktemp -d)
+          trap 'rm -f "$DOCKER_CONFIG/config.json"; rmdir "$DOCKER_CONFIG"' EXIT
+          aws ecr get-login-password --region "$AWS_REGION" |
+            docker login --username AWS --password-stdin "$REGISTRY"
+          docker build --platform linux/amd64 -f Dockerfile.client -t "$REGISTRY/react-client:$GITHUB_SHA" .
+          docker build --platform linux/amd64 -f Dockerfile.server -t "$REGISTRY/node-backend:$GITHUB_SHA" .
+          docker push "$REGISTRY/react-client:$GITHUB_SHA"
+          docker push "$REGISTRY/node-backend:$GITHUB_SHA"
+
+      - name: Deploy through Systems Manager
+        run: python3 .github/scripts/deploy_ssm.py
