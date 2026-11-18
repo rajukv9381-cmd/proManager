@@ -1,0 +1,33 @@
+services:
+  app:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://promanage:promanage@db:5432/promanage
+      JWT_SECRET: ${JWT_SECRET:-}
+      HOST: 0.0.0.0
+      PORT: 3001
+    ports:
+      - "127.0.0.1:3001:3001"
+    volumes:
+      - promanage-uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: promanage
+      POSTGRES_USER: promanage
+      POSTGRES_PASSWORD: promanage
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - promanage-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U promanage -d promanage"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+volumes:
+  promanage-data:
+  promanage-uploads:
