@@ -16,6 +16,7 @@ concurrency:
 env:
   AWS_REGION: ap-southeast-2
   REGISTRY: 838547582366.dkr.ecr.ap-southeast-2.amazonaws.com
+  AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
   DOMAIN: ${{ vars.DEPLOY_DOMAIN }}
   INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
 
@@ -38,6 +39,21 @@ jobs:
           --health-timeout 5s
           --health-retries 12
     steps:
+      - name: Validate deployment variables
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in AWS_ROLE_ARN DOMAIN INSTANCE_ID; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing repository Actions variable: $name (DOMAIN is DEPLOY_DOMAIN; INSTANCE_ID is EC2_INSTANCE_ID)."
+              exit 1
+            fi
+          done
+          if [[ ! "$AWS_ROLE_ARN" =~ ^arn:aws:iam::838547582366:role/[a-zA-Z0-9+=,.@_/-]+$ ]]; then
+            echo "::error::AWS_ROLE_ARN must be an IAM role ARN in account 838547582366."
+            exit 1
+          fi
+
       - name: Check out source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -58,9 +74,18 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c # v4
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-          allowed-account-ids: "838547582366"
+
+      - name: Verify AWS account
+        shell: bash
+        run: |
+          set -euo pipefail
+          account=$(aws sts get-caller-identity --query Account --output text)
+          if [[ "$account" != "838547582366" ]]; then
+            echo "::error::The assumed AWS role is not in the expected account."
+            exit 1
+          fi
 
       - name: Build and push both images
         shell: bash
