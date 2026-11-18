@@ -95,7 +95,8 @@ jobs:
           set -euo pipefail
           export DOCKER_CONFIG
           DOCKER_CONFIG=$(mktemp -d)
-          trap 'rm -f "$DOCKER_CONFIG/config.json"; rmdir "$DOCKER_CONFIG"' EXIT
+          # Docker Buildx may create additional files; the hosted runner removes its temporary directory.
+          trap 'rm -f "$DOCKER_CONFIG/config.json"' EXIT
           aws ecr get-login-password --region "$AWS_REGION" |
             docker login --username AWS --password-stdin "$REGISTRY"
           docker build --platform linux/amd64 -f Dockerfile.client -t "$REGISTRY/react-client:$GITHUB_SHA" .
